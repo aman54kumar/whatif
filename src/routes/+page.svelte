@@ -32,13 +32,46 @@
     lastUpdated: new Date().toISOString(),
   };
 
-  // Reactive statement to ensure dark mode is applied whenever userSettings.darkMode changes
-  $: if (typeof document !== "undefined") {
-    if (userSettings.darkMode) {
-      document.documentElement.classList.add("dark");
-    } else {
+  // Function to apply dark mode to document
+  function applyDarkMode(isDark: boolean) {
+    if (typeof document !== "undefined") {
+      console.log("Applying dark mode:", isDark);
+      console.log(
+        "Document classes before:",
+        document.documentElement.className
+      );
+
+      // Force remove and add to ensure clean state
       document.documentElement.classList.remove("dark");
+
+      if (isDark) {
+        document.documentElement.classList.add("dark");
+      }
+
+      console.log(
+        "Document classes after:",
+        document.documentElement.className
+      );
+      console.log(
+        "Has dark class:",
+        document.documentElement.classList.contains("dark")
+      );
+
+      // Force a style recalculation
+      document.documentElement.style.setProperty(
+        "--force-update",
+        Math.random().toString()
+      );
     }
+  }
+
+  // Reactive statement to ensure dark mode is applied whenever userSettings.darkMode changes
+  $: {
+    console.log(
+      "Reactive statement triggered, darkMode:",
+      userSettings.darkMode
+    );
+    applyDarkMode(userSettings.darkMode);
   }
 
   let showSettings = false;
@@ -72,12 +105,24 @@
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.settings) {
-          userSettings = { ...userSettings, ...data.settings };
-          console.log("Loaded user settings:", userSettings);
+          console.log("Loaded settings from server:", data.settings);
+
+          // Update userSettings with proper reactivity
+          userSettings = {
+            ...userSettings,
+            ...data.settings,
+          };
+
+          console.log("Final userSettings after loading:", userSettings);
+
+          // Explicitly apply dark mode after loading
+          applyDarkMode(userSettings.darkMode);
         }
       }
     } catch (err) {
       console.log("Failed to load user settings, using defaults");
+      // Ensure default light mode is applied
+      applyDarkMode(false);
     }
   }
 
@@ -100,11 +145,27 @@
 
   // Toggle dark mode
   function toggleDarkMode() {
-    userSettings.darkMode = !userSettings.darkMode;
-    userSettings.lastUpdated = new Date().toISOString();
-    userSettings = { ...userSettings }; // Trigger reactivity
+    console.log(
+      "Toggle dark mode called, current state:",
+      userSettings.darkMode
+    );
 
-    console.log("Dark mode toggled to:", userSettings.darkMode);
+    const newDarkMode = !userSettings.darkMode;
+    console.log("New dark mode state will be:", newDarkMode);
+
+    // Update the userSettings object with proper reactivity
+    userSettings = {
+      ...userSettings,
+      darkMode: newDarkMode,
+      lastUpdated: new Date().toISOString(),
+    };
+
+    console.log("Updated userSettings:", userSettings);
+
+    // Immediately apply the dark mode change
+    applyDarkMode(newDarkMode);
+
+    // Save to server
     saveUserSettings();
   }
 
@@ -119,8 +180,12 @@
 
   // Check usage count from localStorage and server
   onMount(async () => {
+    console.log("onMount called, initial userSettings:", userSettings);
+
     // Load user settings first
     await loadUserSettings();
+
+    console.log("After loadUserSettings, userSettings:", userSettings);
 
     const today = new Date().toDateString();
     const storedUsage = localStorage.getItem("whatif_usage");
@@ -165,6 +230,13 @@
         "warning"
       );
     }
+
+    // Final check and force apply dark mode state
+    console.log(
+      "Final onMount check - applying darkMode:",
+      userSettings.darkMode
+    );
+    applyDarkMode(userSettings.darkMode);
   });
 
   // Calculate hours remaining until midnight (daily reset)
