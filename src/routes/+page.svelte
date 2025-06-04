@@ -31,6 +31,16 @@
     resultsCount: 7,
     lastUpdated: new Date().toISOString(),
   };
+
+  // Reactive statement to ensure dark mode is applied whenever userSettings.darkMode changes
+  $: if (typeof document !== "undefined") {
+    if (userSettings.darkMode) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }
+
   let showSettings = false;
 
   // Toast notification state
@@ -62,18 +72,12 @@
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.settings) {
-          userSettings = data.settings;
+          userSettings = { ...userSettings, ...data.settings };
+          console.log("Loaded user settings:", userSettings);
         }
       }
     } catch (err) {
       console.log("Failed to load user settings, using defaults");
-    }
-
-    // Always apply the current dark mode setting to the document
-    if (userSettings.darkMode) {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
     }
   }
 
@@ -98,13 +102,9 @@
   function toggleDarkMode() {
     userSettings.darkMode = !userSettings.darkMode;
     userSettings.lastUpdated = new Date().toISOString();
+    userSettings = { ...userSettings }; // Trigger reactivity
 
-    if (userSettings.darkMode) {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-
+    console.log("Dark mode toggled to:", userSettings.darkMode);
     saveUserSettings();
   }
 
@@ -119,9 +119,6 @@
 
   // Check usage count from localStorage and server
   onMount(async () => {
-    // Ensure document starts in light mode by default
-    document.documentElement.classList.remove("dark");
-
     // Load user settings first
     await loadUserSettings();
 
@@ -180,10 +177,61 @@
     return Math.ceil(diffMs / (1000 * 60 * 60)); // Convert to hours, round up
   }
 
+  // Security utilities
+  function sanitizeInput(input: string): string {
+    if (!input) return "";
+
+    return input
+      .trim()
+      .replace(/[<>]/g, "") // Remove HTML/XML tags
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, "") // Remove control characters
+      .replace(/javascript:/gi, "") // Remove javascript: schemes
+      .replace(/on\w+\s*=/gi, "") // Remove event handlers
+      .substring(0, 500); // Limit length
+  }
+
+  function validateTopic(topic: string): { valid: boolean; error?: string } {
+    if (!topic || topic.trim().length < 3) {
+      return { valid: false, error: "Please enter at least 3 characters" };
+    }
+
+    if (topic.length > 500) {
+      return { valid: false, error: "Topic is too long (max 500 characters)" };
+    }
+
+    // Check for suspicious patterns
+    const suspiciousPatterns = [
+      /javascript:/i,
+      /<script/i,
+      /on\w+\s*=/i,
+      /eval\s*\(/i,
+      /document\.|window\./i,
+      /\.innerHTML/i,
+    ];
+
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(topic)) {
+        return { valid: false, error: "Invalid characters detected" };
+      }
+    }
+
+    return { valid: true };
+  }
+
   // Generate scenario analysis
   async function exploreScenario() {
-    if (!topic.trim()) {
-      error = "Please enter a scenario";
+    // Validate and sanitize inputs
+    const validation = validateTopic(topic);
+    if (!validation.valid) {
+      error = validation.error || "Invalid input";
+      return;
+    }
+
+    const sanitizedTopic = sanitizeInput(topic);
+    const sanitizedPerspective = sanitizeInput(perspective);
+
+    if (!sanitizedTopic.trim()) {
+      error = "Please enter a valid scenario";
       return;
     }
 
@@ -202,17 +250,45 @@
     result = null;
 
     try {
+      const requestBody = {
+        topic: sanitizedTopic,
+        perspective: sanitizedPerspective,
+        resultsCount: userSettings.resultsCount,
+      };
+
+      // Add request size validation
+      const requestSize = JSON.stringify(requestBody).length;
+      if (requestSize > 10240) {
+        // 10KB limit
+        error = "Request too large. Please shorten your input.";
+        return;
+      }
+
       const response = await fetch("/.netlify/functions/generate-pros-cons", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest", // CSRF protection
         },
-        body: JSON.stringify({
-          topic: topic.trim(),
-          perspective: perspective.trim(),
-          resultsCount: userSettings.resultsCount,
-        }),
+        body: JSON.stringify(requestBody),
       });
+
+      if (!response.ok) {
+        // Handle specific error codes
+        if (response.status === 429) {
+          const retryAfter = response.headers.get("Retry-After");
+          const waitTime = retryAfter ? `${retryAfter} seconds` : "a moment";
+          error = `Rate limit exceeded. Please wait ${waitTime} before trying again.`;
+          showToastNotification(error, "error");
+          return;
+        } else if (response.status === 413) {
+          error = "Request too large. Please shorten your input.";
+          return;
+        } else if (response.status >= 500) {
+          error = "Service temporarily unavailable. Please try again.";
+          return;
+        }
+      }
 
       const data = await response.json();
 
@@ -226,14 +302,28 @@
         return;
       }
 
-      if (data.success) {
+      if (data.success && data.data) {
+        // Validate response data structure
+        if (
+          !data.data.positiveOutcomes ||
+          !data.data.potentialChallenges ||
+          !Array.isArray(data.data.positiveOutcomes) ||
+          !Array.isArray(data.data.potentialChallenges)
+        ) {
+          error = "Invalid response format. Please try again.";
+          return;
+        }
+
         result = data.data;
 
-        // Update usage count - try Redis first, then localStorage fallback
+        // Update usage count with enhanced error handling
         try {
           const usageResponse = await fetch("/.netlify/functions/check-usage", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              "X-Requested-With": "XMLHttpRequest",
+            },
             body: JSON.stringify({ increment: true }),
           });
 
@@ -242,12 +332,17 @@
             if (usageData.success && usageData.redisAvailable) {
               // Use Redis count as source of truth
               usageCount = usageData.count;
+              dailyLimit = usageData.limit || 10;
               localStorage.setItem("whatif_usage", usageCount.toString());
+              localStorage.setItem("whatif_limit", dailyLimit.toString());
             } else {
               // Fallback to localStorage
               usageCount++;
               localStorage.setItem("whatif_usage", usageCount.toString());
             }
+          } else if (usageResponse.status === 429) {
+            // Rate limited on usage check
+            console.warn("Usage check rate limited");
           } else {
             // Fallback to localStorage
             usageCount++;
