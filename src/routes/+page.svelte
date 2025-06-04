@@ -20,6 +20,28 @@
   let usageCount = 0;
   let dailyLimit = 5;
 
+  // Toast notification state
+  let showToast = false;
+  let toastMessage = "";
+  let toastType: "warning" | "error" | "info" = "warning";
+
+  // Reference to results section for auto-scrolling
+  let resultsSection: HTMLElement;
+
+  // Show toast notification
+  function showToastNotification(
+    message: string,
+    type: "warning" | "error" | "info" = "warning"
+  ) {
+    toastMessage = message;
+    toastType = type;
+    showToast = true;
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      showToast = false;
+    }, 5000);
+  }
+
   // Check usage count from localStorage and server
   onMount(async () => {
     const today = new Date().toDateString();
@@ -53,7 +75,26 @@
     }
 
     dailyLimit = parseInt(env.PUBLIC_FREE_TIER_DAILY_LIMIT || "5", 10);
+
+    // Only show "almost at limit" warning on page load, not "daily limit reached"
+    // The "daily limit reached" will be shown when user tries to explore
+    if (usageCount >= dailyLimit - 1 && usageCount < dailyLimit) {
+      showToastNotification(
+        "Almost at limit: You have 1 exploration remaining today. Upgrade to Pro for unlimited explorations!",
+        "warning"
+      );
+    }
   });
+
+  // Calculate hours remaining until midnight (daily reset)
+  function getHoursUntilReset(): number {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0); // Set to midnight
+    const diffMs = tomorrow.getTime() - now.getTime();
+    return Math.ceil(diffMs / (1000 * 60 * 60)); // Convert to hours, round up
+  }
 
   // Generate scenario analysis
   async function exploreScenario() {
@@ -63,7 +104,11 @@
     }
 
     if (usageCount >= dailyLimit) {
-      error = `You've reached your daily limit of ${dailyLimit} scenario explorations. Upgrade to Pro for unlimited access!`;
+      const hoursRemaining = getHoursUntilReset();
+      const hourText = hoursRemaining === 1 ? "hour" : "hours";
+      const message = `You've reached your daily limit of ${dailyLimit} scenario explorations. Upgrade to Pro for unlimited access or wait ${hoursRemaining} ${hourText} to try again!`;
+      error = message;
+      showToastNotification(message, "error");
       return;
     }
 
@@ -103,6 +148,21 @@
         usageCount++;
         localStorage.setItem("whatif_usage", usageCount.toString());
 
+        // Show usage warning toasts after successful exploration
+        if (usageCount >= dailyLimit) {
+          const hoursRemaining = getHoursUntilReset();
+          const hourText = hoursRemaining === 1 ? "hour" : "hours";
+          showToastNotification(
+            `Daily limit reached! You've used all ${dailyLimit} explorations today. Upgrade to Pro for unlimited access or wait ${hoursRemaining} ${hourText} for reset!`,
+            "error"
+          );
+        } else if (usageCount >= dailyLimit - 1) {
+          showToastNotification(
+            "Almost at limit: You have 1 exploration remaining today. Upgrade to Pro for unlimited explorations!",
+            "warning"
+          );
+        }
+
         // Try to update server count (best effort, don't fail if it doesn't work)
         try {
           await fetch("/.netlify/functions/check-usage", {
@@ -113,6 +173,16 @@
         } catch (serverErr) {
           console.log("Server usage tracking unavailable, using local storage");
         }
+
+        // Auto-scroll to results section after a brief delay to ensure DOM update
+        setTimeout(() => {
+          if (resultsSection) {
+            resultsSection.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }
+        }, 100);
       } else {
         error = "Invalid response format. Please try again.";
       }
@@ -154,7 +224,7 @@ Explored with WhatIf.DIY`;
 
     try {
       await navigator.clipboard.writeText(text);
-      // Show success feedback (you could add a toast notification here)
+      showToastNotification("Analysis copied to clipboard!", "info");
     } catch (err) {
       console.error("Failed to copy to clipboard:", err);
     }
@@ -188,8 +258,71 @@ Explored with WhatIf.DIY`;
 </svelte:head>
 
 <div
-  class="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50"
+  class="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 flex flex-col"
 >
+  <!-- Toast Notification -->
+  {#if showToast}
+    <div
+      class="fixed top-4 right-4 z-50 max-w-md animate-in slide-in-from-right-2 fade-in-0 duration-300"
+      class:animate-out={!showToast}
+      class:slide-out-to-right-2={!showToast}
+      class:fade-out-0={!showToast}
+    >
+      <div
+        class="flex items-start gap-3 p-4 rounded-lg shadow-lg border-l-4 bg-white"
+        class:border-yellow-400={toastType === "warning"}
+        class:bg-yellow-50={toastType === "warning"}
+        class:border-red-400={toastType === "error"}
+        class:bg-red-50={toastType === "error"}
+        class:border-blue-400={toastType === "info"}
+        class:bg-blue-50={toastType === "info"}
+      >
+        <div class="flex-shrink-0">
+          {#if toastType === "warning"}
+            <span class="text-2xl">⚠️</span>
+          {:else if toastType === "error"}
+            <span class="text-2xl">🚫</span>
+          {:else}
+            <span class="text-2xl">ℹ️</span>
+          {/if}
+        </div>
+        <div class="flex-1">
+          <p
+            class="text-sm font-medium"
+            class:text-yellow-800={toastType === "warning"}
+            class:text-red-800={toastType === "error"}
+            class:text-blue-800={toastType === "info"}
+          >
+            {toastMessage}
+          </p>
+          {#if toastType === "warning" || toastType === "error"}
+            <a
+              href="/pricing"
+              class="text-xs underline hover:no-underline mt-1 inline-block"
+              class:text-yellow-900={toastType === "warning"}
+              class:text-red-900={toastType === "error"}
+            >
+              Upgrade to Pro →
+            </a>
+          {/if}
+        </div>
+        <button
+          on:click={() => (showToast = false)}
+          class="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          <span class="sr-only">Close</span>
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path
+              fill-rule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clip-rule="evenodd"
+            />
+          </svg>
+        </button>
+      </div>
+    </div>
+  {/if}
+
   <!-- Header -->
   <header class="bg-white shadow-sm border-b border-gray-100">
     <div class="max-w-4xl mx-auto px-4 py-6">
@@ -212,8 +345,8 @@ Explored with WhatIf.DIY`;
     </div>
   </header>
 
-  <!-- Main Content -->
-  <main class="max-w-4xl mx-auto px-4 py-8">
+  <!-- Main Content - flex-grow pushes footer to bottom -->
+  <main class="max-w-4xl mx-auto px-4 py-8 flex-grow">
     <!-- Input Form -->
     <div class="bg-white rounded-xl shadow-lg p-6 mb-8">
       <div class="space-y-6">
@@ -289,7 +422,10 @@ Explored with WhatIf.DIY`;
 
     <!-- Results -->
     {#if result}
-      <div class="bg-white rounded-xl shadow-lg p-6 mb-8">
+      <div
+        class="bg-white rounded-xl shadow-lg p-6 mb-8"
+        bind:this={resultsSection}
+      >
         <div class="flex items-center justify-between mb-6">
           <h2 class="text-2xl font-bold text-gray-900">
             What if: {result.topic}
@@ -391,25 +527,52 @@ Explored with WhatIf.DIY`;
         💡 Example Scenarios to Explore
       </h3>
       <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {#each ["What if I started a coffee shop?", "What if I learned to code?", "What if I adopted a pet?", "What if I moved to Japan?", "What if I went back to school?", "What if I started investing?"] as example}
+        {#each [{ question: "What if I started a coffee shop?", perspective: "financial and lifestyle" }, { question: "What if I learned to code?", perspective: "career and personal growth" }, { question: "What if I adopted a pet?", perspective: "lifestyle and responsibility" }, { question: "What if I moved to Japan?", perspective: "cultural and financial" }, { question: "What if I went back to school?", perspective: "career and financial" }, { question: "What if I started investing?", perspective: "financial and long-term planning" }] as example}
           <button
-            on:click={() => {
-              topic = example;
-              perspective = "";
+            on:click={async () => {
+              // Check usage limit before proceeding
+              if (usageCount >= dailyLimit) {
+                const hoursRemaining = getHoursUntilReset();
+                const hourText = hoursRemaining === 1 ? "hour" : "hours";
+                const message = `You've reached your daily limit of ${dailyLimit} scenario explorations. Upgrade to Pro for unlimited access or wait ${hoursRemaining} ${hourText} to try again!`;
+                error = message;
+                showToastNotification(message, "error");
+                return;
+              }
+
+              // Set the form values
+              topic = example.question;
+              perspective = example.perspective;
+
+              // Small delay to ensure UI updates, then auto-explore
+              setTimeout(() => {
+                exploreScenario();
+              }, 100);
             }}
-            class="text-left p-4 border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors group"
+            disabled={isLoading || usageCount >= dailyLimit}
+            class="text-left p-4 border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors group disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <div class="text-gray-700 group-hover:text-purple-700">
-              {example}
+            <div
+              class="text-gray-700 group-hover:text-purple-700 font-medium mb-1"
+            >
+              {example.question}
+            </div>
+            <div class="text-xs text-gray-500 group-hover:text-purple-600">
+              Perspective: {example.perspective}
             </div>
           </button>
         {/each}
       </div>
+
+      <div class="mt-4 text-xs text-gray-500 text-center">
+        💡 Click any example above to instantly explore that scenario with AI
+        analysis
+      </div>
     </div>
   </main>
 
-  <!-- Footer -->
-  <footer class="bg-white border-t border-gray-200 mt-16">
+  <!-- Footer - now sticks to bottom -->
+  <footer class="bg-white border-t border-gray-200 mt-auto">
     <div class="max-w-4xl mx-auto px-4 py-8">
       <div class="flex flex-col md:flex-row justify-between items-center gap-4">
         <div class="text-gray-600">
