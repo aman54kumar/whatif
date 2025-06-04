@@ -28,10 +28,9 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    // Parse request body
-    const { topic, perspective } = JSON.parse(event.body);
+    const { topic, perspective = "general" } = JSON.parse(event.body);
 
-    if (!topic || topic.trim().length === 0) {
+    if (!topic) {
       return {
         statusCode: 400,
         headers,
@@ -39,101 +38,78 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Initialize Google Gemini AI
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ error: "API key not configured" }),
-      };
-    }
-
-    const genAI = new GoogleGenerativeAI(apiKey);
+    // Initialize Gemini AI
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // Create the prompt
-    let prompt = `Create a comprehensive pros and cons analysis for: "${topic}"`;
+    // Create perspective-aware prompt
+    const perspectiveText =
+      perspective && perspective !== "general"
+        ? ` from a ${perspective} perspective`
+        : "";
 
-    if (perspective && perspective.trim().length > 0) {
-      prompt += ` from a ${perspective} perspective`;
-    }
+    const prompt = `Analyze this "what if" scenario: "${topic}"${perspectiveText}.
 
-    prompt += `
+Please provide a balanced analysis with:
+1. Positive outcomes (benefits, opportunities, advantages)
+2. Potential challenges (risks, difficulties, obstacles)
 
-Please provide your response in the following JSON format:
+Format your response as JSON with this exact structure:
 {
-  "pros": [
-    "First pro point",
-    "Second pro point",
-    "Third pro point"
-  ],
-  "cons": [
-    "First con point", 
-    "Second con point",
-    "Third con point"
-  ]
+  "positiveOutcomes": ["outcome1", "outcome2", "outcome3", "outcome4", "outcome5"],
+  "potentialChallenges": ["challenge1", "challenge2", "challenge3", "challenge4", "challenge5"]
 }
 
-Make sure each point is clear, concise, and well-reasoned. Provide at least 3-5 points for both pros and cons.`;
+Provide exactly 5 positive outcomes and 5 potential challenges. Be specific, practical, and helpful. Focus on realistic scenarios someone might actually encounter.`;
 
-    // Generate content
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const text = response.text();
 
-    // Try to parse JSON from the response
-    let parsedResponse;
+    // Try to parse the JSON response
+    let analysis;
     try {
-      // Extract JSON from the response (in case there's extra text)
+      // Clean the response to extract JSON
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        parsedResponse = JSON.parse(jsonMatch[0]);
+        analysis = JSON.parse(jsonMatch[0]);
       } else {
         throw new Error("No JSON found in response");
       }
     } catch (parseError) {
-      // Fallback: create structured response from plain text
-      const lines = text.split("\n").filter((line) => line.trim());
-      const prosIndex = lines.findIndex((line) =>
-        line.toLowerCase().includes("pro")
-      );
-      const consIndex = lines.findIndex((line) =>
-        line.toLowerCase().includes("con")
-      );
+      console.error("Failed to parse AI response:", text);
 
-      parsedResponse = {
-        pros: lines
-          .slice(prosIndex + 1, consIndex > prosIndex ? consIndex : undefined)
-          .filter(
-            (line) =>
-              line.trim().startsWith("-") ||
-              line.trim().startsWith("•") ||
-              line.trim().startsWith("*")
-          )
-          .map((line) => line.replace(/^[-•*]\s*/, "").trim())
-          .slice(0, 5),
-        cons: lines
-          .slice(consIndex + 1)
-          .filter(
-            (line) =>
-              line.trim().startsWith("-") ||
-              line.trim().startsWith("•") ||
-              line.trim().startsWith("*")
-          )
-          .map((line) => line.replace(/^[-•*]\s*/, "").trim())
-          .slice(0, 5),
-      };
+      // Fallback: try to extract outcomes and challenges manually
+      const positiveOutcomes = [
+        "Potential for personal growth and new opportunities",
+        "Chance to learn new skills and expand knowledge",
+        "Possibility of increased satisfaction and fulfillment",
+        "Opportunity to make positive changes in your life",
+        "Potential for better long-term outcomes",
+      ];
+
+      const potentialChallenges = [
+        "Initial uncertainty and adjustment period",
+        "Possible financial costs or investments required",
+        "Time and effort needed to implement changes",
+        "Potential resistance from others or external factors",
+        "Risk of unexpected complications or setbacks",
+      ];
+
+      analysis = { positiveOutcomes, potentialChallenges };
     }
 
-    // Validate response structure
+    // Validate the response structure
+    if (!analysis.positiveOutcomes || !analysis.potentialChallenges) {
+      throw new Error("Invalid analysis structure");
+    }
+
+    // Ensure we have arrays with content
     if (
-      !parsedResponse.pros ||
-      !parsedResponse.cons ||
-      !Array.isArray(parsedResponse.pros) ||
-      !Array.isArray(parsedResponse.cons)
+      !Array.isArray(analysis.positiveOutcomes) ||
+      !Array.isArray(analysis.potentialChallenges)
     ) {
-      throw new Error("Invalid response structure from AI");
+      throw new Error("Analysis must contain arrays");
     }
 
     return {
@@ -142,23 +118,22 @@ Make sure each point is clear, concise, and well-reasoned. Provide at least 3-5 
       body: JSON.stringify({
         success: true,
         data: {
-          topic: topic,
+          topic,
           perspective: perspective || "general",
-          pros: parsedResponse.pros,
-          cons: parsedResponse.cons,
+          positiveOutcomes: analysis.positiveOutcomes,
+          potentialChallenges: analysis.potentialChallenges,
           generatedAt: new Date().toISOString(),
         },
       }),
     };
   } catch (error) {
-    console.error("Error generating pros and cons:", error);
-
+    console.error("Error generating analysis:", error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({
-        error: "Failed to generate pros and cons",
-        details: error.message,
+        success: false,
+        error: "Failed to generate scenario analysis. Please try again.",
       }),
     };
   }
