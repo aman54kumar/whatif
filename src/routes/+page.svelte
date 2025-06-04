@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { env } from "$env/dynamic/public";
 
   // Types
   interface AnalysisResult {
@@ -74,7 +73,7 @@
       );
     }
 
-    dailyLimit = parseInt(env.PUBLIC_FREE_TIER_DAILY_LIMIT || "10", 10);
+    dailyLimit = parseInt("10", 10);
 
     // Only show "almost at limit" warning on page load, not "daily limit reached"
     // The "daily limit reached" will be shown when user tries to explore
@@ -530,8 +529,6 @@ Explored with WhatIf.DIY`;
         {#each [{ question: "What if I started a coffee shop?", perspective: "financial and lifestyle" }, { question: "What if I learned to code?", perspective: "career and personal growth" }, { question: "What if I adopted a pet?", perspective: "lifestyle and responsibility" }, { question: "What if I moved to Japan?", perspective: "cultural and financial" }, { question: "What if I went back to school?", perspective: "career and financial" }, { question: "What if I started investing?", perspective: "financial and long-term planning" }] as example}
           <button
             on:click={() => {
-              console.log("Example clicked:", example.question);
-
               // Check usage limit before proceeding
               if (usageCount >= dailyLimit) {
                 const hoursRemaining = getHoursUntilReset();
@@ -541,8 +538,6 @@ Explored with WhatIf.DIY`;
                 showToastNotification(message, "error");
                 return;
               }
-
-              console.log("Setting form values and exploring...");
 
               // Set the form values
               topic = example.question;
