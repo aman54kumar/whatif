@@ -105,7 +105,7 @@ git add .
 git commit -m "Initial production deployment"
 
 # Add GitHub remote
-git remote add origin https://github.com/yourusername/decisionai.git
+git remote add origin https://github.com/aman54kumar/whatif.git
 git push -u origin main
 ```
 
