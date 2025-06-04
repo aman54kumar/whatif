@@ -18,7 +18,7 @@
   let result: AnalysisResult | null = null;
   let error = "";
   let usageCount = 0;
-  let dailyLimit = 5;
+  let dailyLimit = 10;
 
   // Toast notification state
   let showToast = false;
@@ -74,7 +74,7 @@
       );
     }
 
-    dailyLimit = parseInt(env.PUBLIC_FREE_TIER_DAILY_LIMIT || "5", 10);
+    dailyLimit = parseInt(env.PUBLIC_FREE_TIER_DAILY_LIMIT || "10", 10);
 
     // Only show "almost at limit" warning on page load, not "daily limit reached"
     // The "daily limit reached" will be shown when user tries to explore
@@ -529,7 +529,9 @@ Explored with WhatIf.DIY`;
       <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
         {#each [{ question: "What if I started a coffee shop?", perspective: "financial and lifestyle" }, { question: "What if I learned to code?", perspective: "career and personal growth" }, { question: "What if I adopted a pet?", perspective: "lifestyle and responsibility" }, { question: "What if I moved to Japan?", perspective: "cultural and financial" }, { question: "What if I went back to school?", perspective: "career and financial" }, { question: "What if I started investing?", perspective: "financial and long-term planning" }] as example}
           <button
-            on:click={async () => {
+            on:click={() => {
+              console.log("Example clicked:", example.question);
+
               // Check usage limit before proceeding
               if (usageCount >= dailyLimit) {
                 const hoursRemaining = getHoursUntilReset();
@@ -540,14 +542,17 @@ Explored with WhatIf.DIY`;
                 return;
               }
 
+              console.log("Setting form values and exploring...");
+
               // Set the form values
               topic = example.question;
               perspective = example.perspective;
 
-              // Small delay to ensure UI updates, then auto-explore
-              setTimeout(() => {
-                exploreScenario();
-              }, 100);
+              // Clear any previous errors
+              error = "";
+
+              // Auto-explore immediately
+              exploreScenario();
             }}
             disabled={isLoading || usageCount >= dailyLimit}
             class="text-left p-4 border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors group disabled:opacity-50 disabled:cursor-not-allowed"
