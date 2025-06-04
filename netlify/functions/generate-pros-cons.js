@@ -38,29 +38,63 @@ exports.handler = async (event, context) => {
       };
     }
 
+    // Basic input validation
+    const cleanTopic = topic.trim();
+    if (cleanTopic.length < 3) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error:
+            "Please enter a more detailed scenario (at least 3 characters)",
+        }),
+      };
+    }
+
+    // Check for random gibberish
+    const hasValidWords = /[a-zA-Z]{2,}/.test(cleanTopic);
+    if (!hasValidWords) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "Please enter a meaningful scenario with actual words",
+        }),
+      };
+    }
+
     // Initialize Gemini AI
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // Create perspective-aware prompt
+    // Create perspective-aware prompt with validation
     const perspectiveText =
       perspective && perspective !== "general"
         ? ` from a ${perspective} perspective`
         : "";
 
-    const prompt = `Analyze this "what if" scenario: "${topic}"${perspectiveText}.
+    const prompt = `You are an AI assistant that helps people explore "what if" scenarios. 
 
-Please provide a balanced analysis with:
+IMPORTANT: First, evaluate if this is a valid, meaningful scenario that someone might actually consider: "${cleanTopic}"
+
+If this appears to be random text, gibberish, or not a real scenario someone would explore, respond with:
+{
+  "error": "Please enter a meaningful 'what if' scenario (e.g., 'What if I started my own business?' or 'What if I moved to another city?')"
+}
+
+If it IS a valid scenario, analyze: "${cleanTopic}"${perspectiveText}
+
+Provide a balanced analysis with:
 1. Positive outcomes (benefits, opportunities, advantages)
 2. Potential challenges (risks, difficulties, obstacles)
 
 Format your response as JSON with this exact structure:
 {
-  "positiveOutcomes": ["outcome1", "outcome2", "outcome3", "outcome4", "outcome5"],
-  "potentialChallenges": ["challenge1", "challenge2", "challenge3", "challenge4", "challenge5"]
+  "positiveOutcomes": ["outcome1", "outcome2", "outcome3", "outcome4", "outcome5", "outcome6", "outcome7"],
+  "potentialChallenges": ["challenge1", "challenge2", "challenge3", "challenge4", "challenge5", "challenge6", "challenge7"]
 }
 
-Provide exactly 5 positive outcomes and 5 potential challenges. Be specific, practical, and helpful. Focus on realistic scenarios someone might actually encounter.`;
+Provide exactly 7 positive outcomes and 7 potential challenges. Be specific, practical, and helpful. Focus on realistic scenarios someone might actually encounter.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -72,20 +106,49 @@ Provide exactly 5 positive outcomes and 5 potential challenges. Be specific, pra
       // Clean the response to extract JSON
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        analysis = JSON.parse(jsonMatch[0]);
+        const parsed = JSON.parse(jsonMatch[0]);
+
+        // Check if AI detected invalid input
+        if (parsed.error) {
+          return {
+            statusCode: 400,
+            headers,
+            body: JSON.stringify({ error: parsed.error }),
+          };
+        }
+
+        analysis = parsed;
       } else {
         throw new Error("No JSON found in response");
       }
     } catch (parseError) {
       console.error("Failed to parse AI response:", text);
 
-      // Fallback: try to extract outcomes and challenges manually
+      // If response contains "random" or "gibberish" or similar, it's likely invalid input
+      if (
+        text.toLowerCase().includes("random") ||
+        text.toLowerCase().includes("gibberish") ||
+        text.toLowerCase().includes("meaningful")
+      ) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error:
+              "Please enter a meaningful 'what if' scenario (e.g., 'What if I started my own business?' or 'What if I moved to another city?'",
+          }),
+        };
+      }
+
+      // Fallback: provide generic responses
       const positiveOutcomes = [
         "Potential for personal growth and new opportunities",
         "Chance to learn new skills and expand knowledge",
         "Possibility of increased satisfaction and fulfillment",
         "Opportunity to make positive changes in your life",
         "Potential for better long-term outcomes",
+        "Enhanced creativity and problem-solving abilities",
+        "Opportunity to discover new interests and passions",
       ];
 
       const potentialChallenges = [
@@ -94,6 +157,8 @@ Provide exactly 5 positive outcomes and 5 potential challenges. Be specific, pra
         "Time and effort needed to implement changes",
         "Potential resistance from others or external factors",
         "Risk of unexpected complications or setbacks",
+        "Need to overcome fears and comfort zone limitations",
+        "Possible temporary stress during transition period",
       ];
 
       analysis = { positiveOutcomes, potentialChallenges };
@@ -112,13 +177,21 @@ Provide exactly 5 positive outcomes and 5 potential challenges. Be specific, pra
       throw new Error("Analysis must contain arrays");
     }
 
+    // Ensure we have enough items (minimum 5, target 7)
+    if (
+      analysis.positiveOutcomes.length < 5 ||
+      analysis.potentialChallenges.length < 5
+    ) {
+      throw new Error("Insufficient analysis depth");
+    }
+
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
         data: {
-          topic,
+          topic: cleanTopic,
           perspective: perspective || "general",
           positiveOutcomes: analysis.positiveOutcomes,
           potentialChallenges: analysis.potentialChallenges,

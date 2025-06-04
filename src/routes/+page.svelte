@@ -20,19 +20,36 @@
   let usageCount = 0;
   let dailyLimit = 5;
 
-  // Check usage count from localStorage
-  onMount(() => {
+  // Check usage count from localStorage and server
+  onMount(async () => {
     const today = new Date().toDateString();
     const storedUsage = localStorage.getItem("whatif_usage");
     const storedDate = localStorage.getItem("whatif_date");
 
-    if (storedDate === today && storedUsage) {
-      usageCount = parseInt(storedUsage, 10);
-    } else {
-      // Reset count for new day
+    // Reset local storage for new day
+    if (storedDate !== today) {
       localStorage.setItem("whatif_date", today);
       localStorage.setItem("whatif_usage", "0");
       usageCount = 0;
+    } else if (storedUsage) {
+      usageCount = parseInt(storedUsage, 10);
+    }
+
+    // Also check server-side usage (Redis)
+    try {
+      const response = await fetch("/.netlify/functions/check-usage");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          // Use the higher count between local and server
+          usageCount = Math.max(usageCount, data.count || 0);
+          localStorage.setItem("whatif_usage", usageCount.toString());
+        }
+      }
+    } catch (err) {
+      console.log(
+        "Using local storage for usage tracking (server unavailable)"
+      );
     }
 
     dailyLimit = parseInt(env.PUBLIC_FREE_TIER_DAILY_LIMIT || "5", 10);
@@ -50,8 +67,9 @@
       return;
     }
 
-    isLoading = true;
+    // Clear previous error
     error = "";
+    isLoading = true;
     result = null;
 
     try {
@@ -69,21 +87,43 @@
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to explore scenario");
+        // Handle validation errors with specific messages
+        if (response.status === 400) {
+          error = data.error || "Please enter a valid scenario";
+        } else {
+          error = data.error || "Failed to explore scenario";
+        }
+        return;
       }
 
       if (data.success) {
         result = data.data;
 
-        // Update usage count
+        // Update usage count both locally and potentially on server
         usageCount++;
         localStorage.setItem("whatif_usage", usageCount.toString());
+
+        // Try to update server count (best effort, don't fail if it doesn't work)
+        try {
+          await fetch("/.netlify/functions/check-usage", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ increment: true }),
+          });
+        } catch (serverErr) {
+          console.log("Server usage tracking unavailable, using local storage");
+        }
       } else {
-        throw new Error("Invalid response format");
+        error = "Invalid response format. Please try again.";
       }
     } catch (err) {
-      error =
-        err instanceof Error ? err.message : "An unexpected error occurred";
+      if (err instanceof Error) {
+        error = err.message.includes("fetch")
+          ? "Network error. Please check your connection and try again."
+          : err.message;
+      } else {
+        error = "An unexpected error occurred. Please try again.";
+      }
     } finally {
       isLoading = false;
     }
@@ -373,7 +413,7 @@ Explored with WhatIf.DIY`;
     <div class="max-w-4xl mx-auto px-4 py-8">
       <div class="flex flex-col md:flex-row justify-between items-center gap-4">
         <div class="text-gray-600">
-          <p>&copy; 2024 WhatIf.DIY. Explore every possibility.</p>
+          <p>&copy; 2025 WhatIf.DIY. Explore every possibility.</p>
         </div>
         <div class="flex gap-6 text-sm text-gray-500">
           <a href="/privacy" class="hover:text-gray-700 transition-colors"
