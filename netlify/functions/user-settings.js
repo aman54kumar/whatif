@@ -3,7 +3,7 @@ exports.handler = async (event, context) => {
   const headers = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Content-Type": "application/json",
   };
 
@@ -17,14 +17,14 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    // Get user IP for rate limiting (with privacy considerations)
+    // Get user IP for identification (with privacy considerations)
     const userIP =
       event.headers["x-forwarded-for"] ||
       event.headers["x-real-ip"] ||
       event.requestContext?.identity?.sourceIp ||
       "anonymous";
 
-    // Hash the IP for privacy (simple hash, not for security)
+    // Hash the IP for privacy
     const crypto = require("crypto");
     const hashedIP = crypto
       .createHash("md5")
@@ -33,12 +33,17 @@ exports.handler = async (event, context) => {
       )
       .digest("hex");
 
-    const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD format
-    const redisKey = `usage:${hashedIP}:${today}`;
+    const settingsKey = `settings:${hashedIP}`;
 
-    // Try to connect to Redis
-    let currentCount = 0;
+    // Default settings
+    const defaultSettings = {
+      darkMode: false,
+      resultsCount: 7,
+      lastUpdated: new Date().toISOString(),
+    };
+
     let redisAvailable = false;
+    let settings = defaultSettings;
 
     try {
       if (
@@ -48,22 +53,42 @@ exports.handler = async (event, context) => {
         const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
         const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-        if (event.httpMethod === "POST") {
-          // Increment usage count
-          const response = await fetch(`${redisUrl}/incr/${redisKey}`, {
+        if (event.httpMethod === "POST" || event.httpMethod === "PUT") {
+          // Update settings
+          const body = JSON.parse(event.body || "{}");
+          const newSettings = {
+            ...defaultSettings,
+            ...body,
+            lastUpdated: new Date().toISOString(),
+          };
+
+          // Validate settings
+          if (typeof newSettings.darkMode !== "boolean") {
+            newSettings.darkMode = false;
+          }
+          if (
+            typeof newSettings.resultsCount !== "number" ||
+            newSettings.resultsCount < 3 ||
+            newSettings.resultsCount > 10
+          ) {
+            newSettings.resultsCount = 7;
+          }
+
+          const response = await fetch(`${redisUrl}/set/${settingsKey}`, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${redisToken}`,
+              "Content-Type": "application/json",
             },
+            body: JSON.stringify(newSettings),
           });
 
           if (response.ok) {
-            const data = await response.json();
-            currentCount = data.result || 1;
+            settings = newSettings;
             redisAvailable = true;
 
-            // Set expiration to end of day (24 hours from now)
-            await fetch(`${redisUrl}/expire/${redisKey}/86400`, {
+            // Set expiration to 1 year (31536000 seconds)
+            await fetch(`${redisUrl}/expire/${settingsKey}/31536000`, {
               method: "POST",
               headers: {
                 Authorization: `Bearer ${redisToken}`,
@@ -71,8 +96,8 @@ exports.handler = async (event, context) => {
             });
           }
         } else {
-          // GET request - just check current count
-          const response = await fetch(`${redisUrl}/get/${redisKey}`, {
+          // GET request - retrieve settings
+          const response = await fetch(`${redisUrl}/get/${settingsKey}`, {
             method: "GET",
             headers: {
               Authorization: `Bearer ${redisToken}`,
@@ -81,8 +106,13 @@ exports.handler = async (event, context) => {
 
           if (response.ok) {
             const data = await response.json();
-            currentCount = parseInt(data.result) || 0;
-            redisAvailable = true;
+            if (data.result) {
+              settings =
+                typeof data.result === "string"
+                  ? JSON.parse(data.result)
+                  : data.result;
+              redisAvailable = true;
+            }
           }
         }
       }
@@ -96,25 +126,20 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         success: true,
-        count: currentCount,
+        settings,
         redisAvailable,
-        limit: 10,
-        remaining: Math.max(0, 10 - currentCount),
-        resetDate: today,
       }),
     };
   } catch (error) {
-    console.error("Error in check-usage:", error);
+    console.error("Error in user-settings:", error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({
         success: false,
-        error: "Failed to check usage",
-        count: 0,
+        error: "Failed to handle user settings",
+        settings: defaultSettings,
         redisAvailable: false,
-        limit: 10,
-        remaining: 10,
       }),
     };
   }

@@ -10,6 +10,12 @@
     generatedAt: string;
   }
 
+  interface UserSettings {
+    darkMode: boolean;
+    resultsCount: number;
+    lastUpdated: string;
+  }
+
   // State variables
   let topic = "";
   let perspective = "";
@@ -18,6 +24,14 @@
   let error = "";
   let usageCount = 0;
   let dailyLimit = 10;
+
+  // User settings
+  let userSettings: UserSettings = {
+    darkMode: false,
+    resultsCount: 7,
+    lastUpdated: new Date().toISOString(),
+  };
+  let showSettings = false;
 
   // Toast notification state
   let showToast = false;
@@ -41,8 +55,76 @@
     }, 5000);
   }
 
+  // Load user settings from Redis
+  async function loadUserSettings() {
+    try {
+      const response = await fetch("/.netlify/functions/user-settings");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.settings) {
+          userSettings = data.settings;
+        }
+      }
+    } catch (err) {
+      console.log("Failed to load user settings, using defaults");
+    }
+
+    // Always apply the current dark mode setting to the document
+    if (userSettings.darkMode) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }
+
+  // Save user settings to Redis
+  async function saveUserSettings() {
+    try {
+      const response = await fetch("/.netlify/functions/user-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(userSettings),
+      });
+
+      if (response.ok) {
+        showToastNotification("Settings saved successfully!", "info");
+      }
+    } catch (err) {
+      console.log("Failed to save user settings");
+    }
+  }
+
+  // Toggle dark mode
+  function toggleDarkMode() {
+    userSettings.darkMode = !userSettings.darkMode;
+    userSettings.lastUpdated = new Date().toISOString();
+
+    if (userSettings.darkMode) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+
+    saveUserSettings();
+  }
+
+  // Update results count
+  function updateResultsCount(count: number) {
+    if (count >= 3 && count <= 10) {
+      userSettings.resultsCount = count;
+      userSettings.lastUpdated = new Date().toISOString();
+      saveUserSettings();
+    }
+  }
+
   // Check usage count from localStorage and server
   onMount(async () => {
+    // Ensure document starts in light mode by default
+    document.documentElement.classList.remove("dark");
+
+    // Load user settings first
+    await loadUserSettings();
+
     const today = new Date().toDateString();
     const storedUsage = localStorage.getItem("whatif_usage");
     const storedDate = localStorage.getItem("whatif_date");
@@ -56,23 +138,26 @@
       usageCount = parseInt(storedUsage, 10);
     }
 
-    // Also check server-side usage (Redis)
+    // Check server-side usage (Redis) and sync
     try {
       const response = await fetch("/.netlify/functions/check-usage");
       if (response.ok) {
         const data = await response.json();
-        if (data.success) {
-          // Use the higher count between local and server
-          usageCount = Math.max(usageCount, data.count || 0);
+        if (data.success && data.redisAvailable) {
+          // Use Redis count as source of truth
+          usageCount = data.count || 0;
+          dailyLimit = data.limit || 10;
+
+          // Sync localStorage with Redis
           localStorage.setItem("whatif_usage", usageCount.toString());
+          localStorage.setItem("whatif_limit", dailyLimit.toString());
         }
       }
     } catch (err) {
-      console.log(
-        "Using local storage for usage tracking (server unavailable)"
-      );
+      console.log("Redis unavailable, using localStorage fallback");
     }
 
+    // Set the daily limit
     dailyLimit = parseInt("10", 10);
 
     // Only show "almost at limit" warning on page load, not "daily limit reached"
@@ -125,6 +210,7 @@
         body: JSON.stringify({
           topic: topic.trim(),
           perspective: perspective.trim(),
+          resultsCount: userSettings.resultsCount,
         }),
       });
 
@@ -143,9 +229,35 @@
       if (data.success) {
         result = data.data;
 
-        // Update usage count both locally and potentially on server
-        usageCount++;
-        localStorage.setItem("whatif_usage", usageCount.toString());
+        // Update usage count - try Redis first, then localStorage fallback
+        try {
+          const usageResponse = await fetch("/.netlify/functions/check-usage", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ increment: true }),
+          });
+
+          if (usageResponse.ok) {
+            const usageData = await usageResponse.json();
+            if (usageData.success && usageData.redisAvailable) {
+              // Use Redis count as source of truth
+              usageCount = usageData.count;
+              localStorage.setItem("whatif_usage", usageCount.toString());
+            } else {
+              // Fallback to localStorage
+              usageCount++;
+              localStorage.setItem("whatif_usage", usageCount.toString());
+            }
+          } else {
+            // Fallback to localStorage
+            usageCount++;
+            localStorage.setItem("whatif_usage", usageCount.toString());
+          }
+        } catch (serverErr) {
+          console.log("Redis unavailable, using localStorage");
+          usageCount++;
+          localStorage.setItem("whatif_usage", usageCount.toString());
+        }
 
         // Show usage warning toasts after successful exploration
         if (usageCount >= dailyLimit) {
@@ -160,17 +272,6 @@
             "Almost at limit: You have 1 exploration remaining today. Upgrade to Pro for unlimited explorations!",
             "warning"
           );
-        }
-
-        // Try to update server count (best effort, don't fail if it doesn't work)
-        try {
-          await fetch("/.netlify/functions/check-usage", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ increment: true }),
-          });
-        } catch (serverErr) {
-          console.log("Server usage tracking unavailable, using local storage");
         }
 
         // Auto-scroll to results section after a brief delay to ensure DOM update
@@ -257,7 +358,7 @@ Explored with WhatIf.DIY`;
 </svelte:head>
 
 <div
-  class="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 flex flex-col"
+  class="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 dark:from-gray-900 dark:via-gray-800 dark:to-indigo-900 flex flex-col transition-colors duration-300"
 >
   <!-- Toast Notification -->
   {#if showToast}
@@ -268,13 +369,16 @@ Explored with WhatIf.DIY`;
       class:fade-out-0={!showToast}
     >
       <div
-        class="flex items-start gap-3 p-4 rounded-lg shadow-lg border-l-4 bg-white"
+        class="flex items-start gap-3 p-4 rounded-lg shadow-lg border-l-4 bg-white dark:bg-gray-800"
         class:border-yellow-400={toastType === "warning"}
         class:bg-yellow-50={toastType === "warning"}
+        class:dark:bg-yellow-900={toastType === "warning"}
         class:border-red-400={toastType === "error"}
         class:bg-red-50={toastType === "error"}
+        class:dark:bg-red-900={toastType === "error"}
         class:border-blue-400={toastType === "info"}
         class:bg-blue-50={toastType === "info"}
+        class:dark:bg-blue-900={toastType === "info"}
       >
         <div class="flex-shrink-0">
           {#if toastType === "warning"}
@@ -289,8 +393,11 @@ Explored with WhatIf.DIY`;
           <p
             class="text-sm font-medium"
             class:text-yellow-800={toastType === "warning"}
+            class:dark:text-yellow-200={toastType === "warning"}
             class:text-red-800={toastType === "error"}
+            class:dark:text-red-200={toastType === "error"}
             class:text-blue-800={toastType === "info"}
+            class:dark:text-blue-200={toastType === "info"}
           >
             {toastMessage}
           </p>
@@ -299,7 +406,9 @@ Explored with WhatIf.DIY`;
               href="/pricing"
               class="text-xs underline hover:no-underline mt-1 inline-block"
               class:text-yellow-900={toastType === "warning"}
+              class:dark:text-yellow-300={toastType === "warning"}
               class:text-red-900={toastType === "error"}
+              class:dark:text-red-300={toastType === "error"}
             >
               Upgrade to Pro →
             </a>
@@ -307,7 +416,7 @@ Explored with WhatIf.DIY`;
         </div>
         <button
           on:click={() => (showToast = false)}
-          class="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+          class="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
         >
           <span class="sr-only">Close</span>
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -323,36 +432,171 @@ Explored with WhatIf.DIY`;
   {/if}
 
   <!-- Header -->
-  <header class="bg-white shadow-sm border-b border-gray-100">
+  <header
+    class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-100 dark:border-gray-700 transition-colors duration-300"
+  >
     <div class="max-w-4xl mx-auto px-4 py-6">
       <div class="flex items-center justify-between">
         <div>
-          <h1 class="text-3xl font-bold text-gray-900">
-            <span class="text-purple-600">What</span><span class="text-blue-600"
-              >If</span
-            ><span class="text-purple-500">.DIY</span>
+          <h1 class="text-3xl font-bold text-gray-900 dark:text-white">
+            <span class="text-purple-600 dark:text-purple-400">What</span><span
+              class="text-blue-600 dark:text-blue-400">If</span
+            ><span class="text-purple-500 dark:text-purple-300">.DIY</span>
           </h1>
-          <p class="text-gray-600 mt-1">Explore every possibility with AI</p>
+          <p class="text-gray-600 dark:text-gray-300 mt-1">
+            Explore every possibility with AI
+          </p>
         </div>
-        <div class="text-right">
-          <div class="text-sm text-gray-500">Free Tier</div>
-          <div class="text-xs text-gray-400">
-            {usageCount}/{dailyLimit} explorations today
+        <div class="flex items-center gap-4">
+          <!-- Dark mode toggle -->
+          <button
+            on:click={toggleDarkMode}
+            class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+            title={userSettings.darkMode
+              ? "Switch to light mode"
+              : "Switch to dark mode"}
+          >
+            {#if userSettings.darkMode}
+              <svg
+                class="w-5 h-5 text-yellow-500"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            {:else}
+              <svg
+                class="w-5 h-5 text-gray-700"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"
+                />
+              </svg>
+            {/if}
+          </button>
+
+          <!-- Settings button -->
+          <button
+            on:click={() => (showSettings = !showSettings)}
+            class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+            title="Settings"
+          >
+            <svg
+              class="w-5 h-5 text-gray-700 dark:text-gray-300"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </button>
+
+          <div class="text-right">
+            <div class="text-sm text-gray-500 dark:text-gray-400">
+              Free Tier
+            </div>
+            <div class="text-xs text-gray-400 dark:text-gray-500">
+              {usageCount}/{dailyLimit} explorations today
+            </div>
           </div>
         </div>
       </div>
     </div>
   </header>
 
+  <!-- Settings Panel -->
+  {#if showSettings}
+    <div
+      class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 transition-colors duration-300"
+    >
+      <div class="max-w-4xl mx-auto px-4 py-6">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          ⚙️ Settings
+        </h2>
+
+        <div class="space-y-4">
+          <!-- Results Count Setting -->
+          <div>
+            <label
+              class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
+              Number of results per exploration
+            </label>
+            <div class="flex items-center gap-4">
+              <input
+                type="range"
+                min="3"
+                max="10"
+                bind:value={userSettings.resultsCount}
+                on:change={() => updateResultsCount(userSettings.resultsCount)}
+                class="flex-1 h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer slider"
+              />
+              <span
+                class="text-sm font-medium text-gray-900 dark:text-white min-w-[2rem] text-center"
+              >
+                {userSettings.resultsCount}
+              </span>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Choose between 3-10 positive outcomes and challenges for each
+              exploration
+            </p>
+          </div>
+
+          <!-- Dark Mode Setting -->
+          <div class="flex items-center justify-between">
+            <div>
+              <label
+                class="text-sm font-medium text-gray-700 dark:text-gray-300"
+              >
+                Dark Mode
+              </label>
+              <p class="text-xs text-gray-500 dark:text-gray-400">
+                Toggle between light and dark theme
+              </p>
+            </div>
+            <button
+              on:click={toggleDarkMode}
+              class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 ${
+                userSettings.darkMode ? "bg-purple-600" : "bg-gray-200"
+              }`}
+            >
+              <span
+                class={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  userSettings.darkMode ? "translate-x-6" : "translate-x-1"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-4 text-xs text-gray-500 dark:text-gray-400">
+          💡 Settings are automatically saved to your account
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <!-- Main Content - flex-grow pushes footer to bottom -->
   <main class="max-w-4xl mx-auto px-4 py-8 flex-grow">
     <!-- Input Form -->
-    <div class="bg-white rounded-xl shadow-lg p-6 mb-8">
+    <div
+      class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 transition-colors duration-300"
+    >
       <div class="space-y-6">
         <div>
           <label
             for="topic"
-            class="block text-sm font-medium text-gray-700 mb-2"
+            class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
           >
             What if scenario would you like to explore?
           </label>
@@ -361,7 +605,7 @@ Explored with WhatIf.DIY`;
             type="text"
             bind:value={topic}
             placeholder="What if I started my own business? What if I moved to another country? What if I changed careers?"
-            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors"
+            class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
             disabled={isLoading}
           />
         </div>
@@ -369,7 +613,7 @@ Explored with WhatIf.DIY`;
         <div>
           <label
             for="perspective"
-            class="block text-sm font-medium text-gray-700 mb-2"
+            class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
           >
             Perspective (optional)
           </label>
@@ -378,7 +622,7 @@ Explored with WhatIf.DIY`;
             type="text"
             bind:value={perspective}
             placeholder="e.g., 'environmental', 'financial', 'health', 'family'"
-            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors"
+            class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
             disabled={isLoading}
           />
         </div>
@@ -402,7 +646,7 @@ Explored with WhatIf.DIY`;
           {#if result}
             <button
               on:click={clearResults}
-              class="px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              class="px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
             >
               Clear
             </button>
@@ -411,7 +655,7 @@ Explored with WhatIf.DIY`;
 
         {#if error}
           <div
-            class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg"
+            class="bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-200 px-4 py-3 rounded-lg"
           >
             {error}
           </div>
@@ -422,16 +666,16 @@ Explored with WhatIf.DIY`;
     <!-- Results -->
     {#if result}
       <div
-        class="bg-white rounded-xl shadow-lg p-6 mb-8"
+        class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 transition-colors duration-300"
         bind:this={resultsSection}
       >
         <div class="flex items-center justify-between mb-6">
-          <h2 class="text-2xl font-bold text-gray-900">
+          <h2 class="text-2xl font-bold text-gray-900 dark:text-white">
             What if: {result.topic}
           </h2>
           <button
             on:click={copyToClipboard}
-            class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
             title="Copy to clipboard"
           >
             📋 Copy
@@ -439,8 +683,10 @@ Explored with WhatIf.DIY`;
         </div>
 
         {#if result.perspective && result.perspective !== "general"}
-          <div class="mb-6 bg-purple-50 border-l-4 border-purple-400 p-4">
-            <div class="text-sm text-purple-700">
+          <div
+            class="mb-6 bg-purple-50 dark:bg-purple-900 border-l-4 border-purple-400 p-4"
+          >
+            <div class="text-sm text-purple-700 dark:text-purple-200">
               <strong>Perspective:</strong>
               {result.perspective}
             </div>
@@ -451,14 +697,16 @@ Explored with WhatIf.DIY`;
           <!-- Positive Outcomes -->
           <div class="space-y-4">
             <h3
-              class="text-xl font-semibold text-green-800 flex items-center gap-2"
+              class="text-xl font-semibold text-green-800 dark:text-green-300 flex items-center gap-2"
             >
               ✨ Positive Outcomes
             </h3>
             <div class="space-y-3">
               {#each result.positiveOutcomes as outcome, index}
-                <div class="bg-green-50 border border-green-200 p-4 rounded-lg">
-                  <div class="text-green-900">
+                <div
+                  class="bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-700 p-4 rounded-lg"
+                >
+                  <div class="text-green-900 dark:text-green-100">
                     <span class="font-medium">{index + 1}.</span>
                     {outcome}
                   </div>
@@ -470,16 +718,16 @@ Explored with WhatIf.DIY`;
           <!-- Potential Challenges -->
           <div class="space-y-4">
             <h3
-              class="text-xl font-semibold text-orange-800 flex items-center gap-2"
+              class="text-xl font-semibold text-orange-800 dark:text-orange-300 flex items-center gap-2"
             >
               ⚠️ Potential Challenges
             </h3>
             <div class="space-y-3">
               {#each result.potentialChallenges as challenge, index}
                 <div
-                  class="bg-orange-50 border border-orange-200 p-4 rounded-lg"
+                  class="bg-orange-50 dark:bg-orange-900 border border-orange-200 dark:border-orange-700 p-4 rounded-lg"
                 >
-                  <div class="text-orange-900">
+                  <div class="text-orange-900 dark:text-orange-100">
                     <span class="font-medium">{index + 1}.</span>
                     {challenge}
                   </div>
@@ -489,7 +737,7 @@ Explored with WhatIf.DIY`;
           </div>
         </div>
 
-        <div class="mt-6 text-xs text-gray-500 text-center">
+        <div class="mt-6 text-xs text-gray-500 dark:text-gray-400 text-center">
           Generated on {new Date(result.generatedAt).toLocaleDateString()} at {new Date(
             result.generatedAt
           ).toLocaleTimeString()}
@@ -500,29 +748,33 @@ Explored with WhatIf.DIY`;
     <!-- Usage Limit Warning -->
     {#if usageCount >= dailyLimit - 1 && usageCount < dailyLimit}
       <div
-        class="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg mb-8"
+        class="bg-yellow-50 dark:bg-yellow-900 border border-yellow-200 dark:border-yellow-700 text-yellow-800 dark:text-yellow-200 px-4 py-3 rounded-lg mb-8"
       >
         <strong>Almost at limit:</strong> You have 1 exploration remaining
         today.
-        <a href="/pricing" class="text-yellow-900 underline hover:no-underline"
+        <a
+          href="/pricing"
+          class="text-yellow-900 dark:text-yellow-300 underline hover:no-underline"
           >Upgrade to Pro</a
         > for unlimited explorations!
       </div>
     {:else if usageCount >= dailyLimit}
       <div
-        class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg mb-8"
+        class="bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 text-red-800 dark:text-red-200 px-4 py-3 rounded-lg mb-8"
       >
         <strong>Daily limit reached:</strong> You've used all {dailyLimit} explorations
         today.
-        <a href="/pricing" class="text-red-900 underline hover:no-underline"
+        <a
+          href="/pricing"
+          class="text-red-900 dark:text-red-300 underline hover:no-underline"
           >Upgrade to Pro</a
         > for unlimited access!
       </div>
     {/if}
 
     <!-- Example Scenarios -->
-    <div class="bg-white rounded-xl shadow-lg p-6">
-      <h3 class="text-xl font-semibold text-gray-900 mb-4">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+      <h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">
         💡 Example Scenarios to Explore
       </h3>
       <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -550,21 +802,61 @@ Explored with WhatIf.DIY`;
               exploreScenario();
             }}
             disabled={isLoading || usageCount >= dailyLimit}
-            class="text-left p-4 border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors group disabled:opacity-50 disabled:cursor-not-allowed"
+            class="text-left p-4 border border-gray-200 dark:border-gray-600 rounded-lg transition-colors group"
+            class:hover:border-purple-300={!(
+              isLoading || usageCount >= dailyLimit
+            )}
+            class:hover:bg-purple-50={!(isLoading || usageCount >= dailyLimit)}
+            class:dark:hover:bg-purple-900={!(
+              isLoading || usageCount >= dailyLimit
+            )}
+            class:disabled:opacity-50={isLoading || usageCount >= dailyLimit}
+            class:disabled:cursor-not-allowed={isLoading ||
+              usageCount >= dailyLimit}
+            class:bg-white={!(isLoading || usageCount >= dailyLimit)}
+            class:dark:bg-gray-800={!(isLoading || usageCount >= dailyLimit)}
+            class:bg-gray-100={isLoading || usageCount >= dailyLimit}
+            class:dark:bg-gray-700={isLoading || usageCount >= dailyLimit}
           >
             <div
-              class="text-gray-700 group-hover:text-purple-700 font-medium mb-1"
+              class="font-medium mb-1 transition-colors"
+              class:text-gray-700={!(isLoading || usageCount >= dailyLimit)}
+              class:dark:text-gray-300={!(
+                isLoading || usageCount >= dailyLimit
+              )}
+              class:group-hover:text-purple-700={!(
+                isLoading || usageCount >= dailyLimit
+              )}
+              class:dark:group-hover:text-purple-300={!(
+                isLoading || usageCount >= dailyLimit
+              )}
+              class:text-gray-400={isLoading || usageCount >= dailyLimit}
+              class:dark:text-gray-500={isLoading || usageCount >= dailyLimit}
             >
               {example.question}
             </div>
-            <div class="text-xs text-gray-500 group-hover:text-purple-600">
+            <div
+              class="text-xs transition-colors"
+              class:text-gray-500={!(isLoading || usageCount >= dailyLimit)}
+              class:dark:text-gray-400={!(
+                isLoading || usageCount >= dailyLimit
+              )}
+              class:group-hover:text-purple-600={!(
+                isLoading || usageCount >= dailyLimit
+              )}
+              class:dark:group-hover:text-purple-400={!(
+                isLoading || usageCount >= dailyLimit
+              )}
+              class:text-gray-400={isLoading || usageCount >= dailyLimit}
+              class:dark:text-gray-600={isLoading || usageCount >= dailyLimit}
+            >
               Perspective: {example.perspective}
             </div>
           </button>
         {/each}
       </div>
 
-      <div class="mt-4 text-xs text-gray-500 text-center">
+      <div class="mt-4 text-xs text-gray-500 dark:text-gray-400 text-center">
         💡 Click any example above to instantly explore that scenario with AI
         analysis
       </div>
@@ -572,20 +864,28 @@ Explored with WhatIf.DIY`;
   </main>
 
   <!-- Footer - now sticks to bottom -->
-  <footer class="bg-white border-t border-gray-200 mt-auto">
+  <footer
+    class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto transition-colors duration-300"
+  >
     <div class="max-w-4xl mx-auto px-4 py-8">
       <div class="flex flex-col md:flex-row justify-between items-center gap-4">
-        <div class="text-gray-600">
+        <div class="text-gray-600 dark:text-gray-400">
           <p>&copy; 2025 WhatIf.DIY. Explore every possibility.</p>
         </div>
-        <div class="flex gap-6 text-sm text-gray-500">
-          <a href="/privacy" class="hover:text-gray-700 transition-colors"
+        <div class="flex gap-6 text-sm text-gray-500 dark:text-gray-400">
+          <a
+            href="/privacy"
+            class="hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
             >Privacy Policy</a
           >
-          <a href="/terms" class="hover:text-gray-700 transition-colors"
+          <a
+            href="/terms"
+            class="hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
             >Terms of Service</a
           >
-          <a href="/cookies" class="hover:text-gray-700 transition-colors"
+          <a
+            href="/cookies"
+            class="hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
             >Cookie Policy</a
           >
         </div>

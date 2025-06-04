@@ -28,7 +28,11 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const { topic, perspective = "general" } = JSON.parse(event.body);
+    const {
+      topic,
+      perspective = "general",
+      resultsCount = 7,
+    } = JSON.parse(event.body);
 
     if (!topic) {
       return {
@@ -37,6 +41,12 @@ exports.handler = async (event, context) => {
         body: JSON.stringify({ error: "Topic is required" }),
       };
     }
+
+    // Validate resultsCount
+    const validResultsCount = Math.min(
+      Math.max(parseInt(resultsCount) || 7, 3),
+      10
+    );
 
     // Basic input validation
     const cleanTopic = topic.trim();
@@ -90,11 +100,17 @@ Provide a balanced analysis with:
 
 Format your response as JSON with this exact structure:
 {
-  "positiveOutcomes": ["outcome1", "outcome2", "outcome3", "outcome4", "outcome5", "outcome6", "outcome7"],
-  "potentialChallenges": ["challenge1", "challenge2", "challenge3", "challenge4", "challenge5", "challenge6", "challenge7"]
+  "positiveOutcomes": [${Array(validResultsCount)
+    .fill(0)
+    .map((_, i) => `"outcome${i + 1}"`)
+    .join(", ")}],
+  "potentialChallenges": [${Array(validResultsCount)
+    .fill(0)
+    .map((_, i) => `"challenge${i + 1}"`)
+    .join(", ")}]
 }
 
-Provide exactly 7 positive outcomes and 7 potential challenges. Be specific, practical, and helpful. Focus on realistic scenarios someone might actually encounter.`;
+Provide exactly ${validResultsCount} positive outcomes and ${validResultsCount} potential challenges. Be specific, practical, and helpful. Focus on realistic scenarios someone might actually encounter.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
