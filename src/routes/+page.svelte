@@ -101,7 +101,9 @@
   // Load user settings from Redis
   async function loadUserSettings() {
     try {
-      const response = await fetch("/.netlify/functions/user-settings");
+      const response = await fetch(
+        "/.netlify/functions/user-data?action=settings"
+      );
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.settings) {
@@ -129,11 +131,14 @@
   // Save user settings to Redis
   async function saveUserSettings() {
     try {
-      const response = await fetch("/.netlify/functions/user-settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(userSettings),
-      });
+      const response = await fetch(
+        "/.netlify/functions/user-data?action=settings",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(userSettings),
+        }
+      );
 
       if (response.ok) {
         showToastNotification("Settings saved successfully!", "info");
@@ -202,7 +207,9 @@
 
     // Check server-side usage (Redis) and sync
     try {
-      const response = await fetch("/.netlify/functions/check-usage");
+      const response = await fetch(
+        "/.netlify/functions/user-data?action=usage"
+      );
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.redisAvailable) {
@@ -390,14 +397,17 @@
 
         // Update usage count with enhanced error handling
         try {
-          const usageResponse = await fetch("/.netlify/functions/check-usage", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Requested-With": "XMLHttpRequest",
-            },
-            body: JSON.stringify({ increment: true }),
-          });
+          const usageResponse = await fetch(
+            "/.netlify/functions/user-data?action=usage",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+              },
+              body: JSON.stringify({ increment: true }),
+            }
+          );
 
           if (usageResponse.ok) {
             const usageData = await usageResponse.json();
