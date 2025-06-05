@@ -1178,6 +1178,89 @@ Explored with WhatIf.DIY`;
         analysis
       </div>
     </div>
+
+    <!-- Newsletter Signup for Monetization -->
+    <div
+      class="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900 dark:to-blue-900 rounded-xl shadow-lg p-6 mt-8"
+    >
+      <div class="text-center">
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+          📧 Get Weekly Scenario Planning Tips
+        </h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+          Join 1000+ decision makers who receive exclusive scenario templates,
+          decision-making frameworks, and strategic planning insights.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
+          <input
+            type="email"
+            placeholder="Enter your email"
+            class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          />
+          <button
+            class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+          >
+            Subscribe
+          </button>
+        </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+          Free forever. Unsubscribe anytime. No spam.
+        </p>
+      </div>
+    </div>
+
+    <!-- Sponsored Content Section -->
+    <div
+      class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mt-8 border-l-4 border-blue-500"
+    >
+      <div class="flex items-start justify-between mb-4">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+          🎯 Recommended for Decision Makers
+        </h3>
+        <span
+          class="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded"
+        >
+          Sponsored
+        </span>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-4">
+        <a
+          href="https://www.skillshare.com/browse/business"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+        >
+          <div class="font-medium text-gray-900 dark:text-white mb-1">
+            📚 Strategic Thinking Courses
+          </div>
+          <div class="text-sm text-gray-600 dark:text-gray-400">
+            Learn advanced decision-making frameworks and scenario planning
+            techniques from industry experts.
+          </div>
+        </a>
+
+        <a
+          href="https://www.notion.so/templates"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+        >
+          <div class="font-medium text-gray-900 dark:text-white mb-1">
+            📋 Planning Templates
+          </div>
+          <div class="text-sm text-gray-600 dark:text-gray-400">
+            Professional templates for business planning, decision matrices, and
+            strategic analysis.
+          </div>
+        </a>
+      </div>
+
+      <div class="mt-4 text-xs text-gray-500 dark:text-gray-400 text-center">
+        💡 These resources help you implement insights from your scenario
+        analysis
+      </div>
+    </div>
   </main>
 
   <!-- Footer - now sticks to bottom -->
