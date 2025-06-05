@@ -617,7 +617,10 @@ Explored with WhatIf.DIY`;
     name="keywords"
     content="what if analysis, scenario planning, decision making, AI, possibilities, outcomes"
   />
-
+  <meta
+    name="google-site-verification"
+    content="eJ5Y3n92tpo5o4XHf0P2peoaHmFea-TOYq7DAFAtOUc"
+  />
   <!-- Google Analytics -->
   <script
     async
