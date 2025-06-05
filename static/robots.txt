@@ -1,0 +1,42 @@
+User-agent: *
+Allow: /
+
+# Sitemaps
+Sitemap: https://whatif.diy/sitemap.xml
+
+# Crawl-delay for courtesy
+Crawl-delay: 1
+
+# Allow all major search engines
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: DuckDuckBot
+Allow: /
+
+User-agent: YandexBot
+Allow: /
+
+# Block AI training crawlers if desired
+User-agent: GPTBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+# Block any potential abuse
+User-agent: *
+Disallow: /.netlify/
+Disallow: /node_modules/
+Disallow: /*.json$
+Disallow: /*.js$
+Disallow: /*.ts$ 

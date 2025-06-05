@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import SEO from "$lib/components/SEO.svelte";
 
   // Types
   interface AnalysisResult {
@@ -31,6 +32,104 @@
     resultsCount: 7,
     lastUpdated: new Date().toISOString(),
   };
+
+  // SEO data based on current state
+  $: seoTitle = result
+    ? `What if: ${result.topic} - WhatIf.DIY Analysis`
+    : "WhatIf.DIY - AI-Powered Scenario Explorer | Free Decision Making Tool";
+
+  $: seoDescription = result
+    ? `Explore the scenario "${result.topic}" with ${result.positiveOutcomes.length} positive outcomes and ${result.potentialChallenges.length} potential challenges. AI-powered analysis for better decision making.`
+    : "Explore any what if scenario with AI-powered analysis. Get instant insights into positive outcomes and potential challenges for smarter decision making. Free tool with unlimited possibilities.";
+
+  $: seoKeywords = result
+    ? `what if ${result.topic}, ${result.topic} analysis, ${result.topic} outcomes, ${result.topic} challenges, scenario planning, decision making, AI analysis`
+    : "what if analysis, scenario planning, decision making tool, AI scenario explorer, future planning, risk assessment, opportunity analysis, decision support, what if scenarios, free planning tool";
+
+  // Structured data for the current scenario
+  $: structuredData = result
+    ? {
+        "@context": "https://schema.org",
+        "@type": ["WebPage", "AnalysisReport"],
+        name: `What if: ${result.topic}`,
+        headline: `AI Analysis: ${result.topic}`,
+        description: seoDescription,
+        url: "https://whatif.diy/",
+        dateCreated: result.generatedAt,
+        datePublished: result.generatedAt,
+        about: {
+          "@type": "Thing",
+          name: result.topic,
+          description: `Scenario analysis of: ${result.topic}`,
+        },
+        publisher: {
+          "@type": "Organization",
+          name: "WhatIf.DIY",
+          url: "https://whatif.diy/",
+          logo: {
+            "@type": "ImageObject",
+            url: "https://whatif.diy/favicon.png",
+          },
+        },
+        mainEntity: {
+          "@type": "AnalysisReport",
+          name: `Analysis: ${result.topic}`,
+          description: `Comprehensive analysis showing ${result.positiveOutcomes.length} positive outcomes and ${result.potentialChallenges.length} potential challenges`,
+          dateCreated: result.generatedAt,
+          creator: {
+            "@type": "SoftwareApplication",
+            name: "WhatIf.DIY AI Engine",
+          },
+        },
+        potentialAction: {
+          "@type": "AnalyzeAction",
+          name: "Analyze Scenario",
+          description: "Get AI-powered analysis of any what-if scenario",
+          target: "https://whatif.diy/",
+        },
+      }
+    : {
+        "@context": "https://schema.org",
+        "@type": ["WebPage", "SoftwareApplication"],
+        name: "WhatIf.DIY - AI Scenario Explorer",
+        headline: "Explore Every Possibility with AI-Powered Analysis",
+        description: seoDescription,
+        url: "https://whatif.diy/",
+        applicationCategory: "ProductivityApplication",
+        operatingSystem: "Web Browser",
+        offers: {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "USD",
+          description: "Free tier with 10 daily scenario explorations",
+        },
+        featureList: [
+          "AI-powered scenario analysis",
+          "Positive outcome identification",
+          "Challenge assessment",
+          "Decision support",
+          "Real-time insights",
+        ],
+        publisher: {
+          "@type": "Organization",
+          name: "WhatIf.DIY",
+          url: "https://whatif.diy/",
+          logo: {
+            "@type": "ImageObject",
+            url: "https://whatif.diy/favicon.png",
+          },
+        },
+        potentialAction: {
+          "@type": "UseAction",
+          name: "Explore Scenario",
+          description: "Analyze any what-if scenario with AI",
+          target: "https://whatif.diy/",
+          object: {
+            "@type": "WebPageElement",
+            description: "Scenario input form",
+          },
+        },
+      };
 
   // Function to apply dark mode to document
   function applyDarkMode(isDark: boolean) {
@@ -534,9 +633,23 @@ Explored with WhatIf.DIY`;
   </script>
 </svelte:head>
 
+<SEO
+  title={seoTitle}
+  description={seoDescription}
+  keywords={seoKeywords}
+  {structuredData}
+  image="https://whatif.diy/og-image.png"
+  imageAlt="WhatIf.DIY - AI-powered scenario exploration and analysis tool"
+/>
+
 <div
   class="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 dark:from-gray-900 dark:via-gray-800 dark:to-indigo-900 flex flex-col transition-colors duration-300"
+  itemscope
+  itemtype="https://schema.org/WebPage"
 >
+  <meta itemprop="name" content={seoTitle} />
+  <meta itemprop="description" content={seoDescription} />
+
   <!-- Toast Notification -->
   {#if showToast}
     <div
@@ -611,18 +724,28 @@ Explored with WhatIf.DIY`;
   <!-- Header -->
   <header
     class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-100 dark:border-gray-700 transition-colors duration-300"
+    itemscope
+    itemtype="https://schema.org/WPHeader"
   >
     <div class="max-w-4xl mx-auto px-4 py-6">
       <div class="flex items-center justify-between">
-        <div>
-          <h1 class="text-3xl font-bold text-gray-900 dark:text-white">
+        <div itemscope itemtype="https://schema.org/Organization">
+          <h1
+            class="text-3xl font-bold text-gray-900 dark:text-white"
+            itemprop="name"
+          >
             <span class="text-purple-600 dark:text-purple-400">What</span><span
               class="text-blue-600 dark:text-blue-400">If</span
             ><span class="text-purple-500 dark:text-purple-300">.DIY</span>
           </h1>
-          <p class="text-gray-600 dark:text-gray-300 mt-1">
+          <p
+            class="text-gray-600 dark:text-gray-300 mt-1"
+            itemprop="description"
+          >
             Explore every possibility with AI
           </p>
+          <meta itemprop="url" content="https://whatif.diy/" />
+          <meta itemprop="logo" content="https://whatif.diy/favicon.png" />
         </div>
         <div class="flex items-center gap-4">
           <!-- Dark mode toggle -->
@@ -764,10 +887,19 @@ Explored with WhatIf.DIY`;
   {/if}
 
   <!-- Main Content - flex-grow pushes footer to bottom -->
-  <main class="max-w-4xl mx-auto px-4 py-8 flex-grow">
+  <main
+    class="max-w-4xl mx-auto px-4 py-8 flex-grow"
+    itemscope
+    itemtype="https://schema.org/WebPageElement"
+    itemprop="mainContentOfPage"
+  >
     <!-- Input Form -->
-    <div
+    <section
       class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 transition-colors duration-300"
+      itemscope
+      itemtype="https://schema.org/WebPageElement"
+      itemprop="mainEntity"
+      aria-label="Scenario Analysis Form"
     >
       <div class="space-y-6">
         <div>
@@ -784,7 +916,12 @@ Explored with WhatIf.DIY`;
             placeholder="What if I started my own business? What if I moved to another country? What if I changed careers?"
             class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
             disabled={isLoading}
+            aria-describedby="topic-description"
+            itemprop="query"
           />
+          <div id="topic-description" class="sr-only">
+            Enter any what-if scenario you'd like to explore with AI analysis
+          </div>
         </div>
 
         <div>
@@ -838,7 +975,7 @@ Explored with WhatIf.DIY`;
           </div>
         {/if}
       </div>
-    </div>
+    </section>
 
     <!-- Results -->
     {#if result}

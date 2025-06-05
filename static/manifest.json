@@ -1,0 +1,21 @@
+{
+  "name": "WhatIf.DIY - AI Scenario Explorer",
+  "short_name": "WhatIf.DIY",
+  "description": "Explore any what if scenario with AI-powered analysis. Discover positive outcomes and potential challenges for better decision making.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#7c3aed",
+  "orientation": "portrait",
+  "scope": "/",
+  "lang": "en",
+  "categories": ["productivity", "education", "lifestyle"],
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
